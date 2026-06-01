@@ -39,7 +39,8 @@ RUN --mount=type=cache,target=/root/.npm \
   && node -e "require('better-sqlite3')(':memory:').close()"
 
 # Use Turbopack for significant build speedup
-ENV OMNIROUTE_USE_TURBOPACK=1
+ARG OMNIROUTE_USE_TURBOPACK=1
+ENV OMNIROUTE_USE_TURBOPACK=${OMNIROUTE_USE_TURBOPACK}
 
 COPY . ./
 RUN --mount=type=cache,target=/app/.next/cache \
