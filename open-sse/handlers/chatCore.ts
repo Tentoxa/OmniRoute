@@ -164,7 +164,7 @@ import {
   buildAccountSemaphoreKey,
   markBlocked as markAccountSemaphoreBlocked,
 } from "../services/accountSemaphore.ts";
-import { lockModel, lockModelIfPerModelQuota } from "../services/accountFallback.ts";
+import { isCreditsExhausted, lockModel, lockModelIfPerModelQuota } from "../services/accountFallback.ts";
 import {
   generateSignature,
   getCachedResponse,
@@ -4633,6 +4633,9 @@ export async function handleChatCore({
               `[provider] Node ${connectionId} ModelScope model quota exhausted (${statusCode}) for ${model} - ${Math.ceil(quotaCooldownMs / 1000)}s (connection stays active)`
             );
           } else if (
+            // Terminal quota exhaustion (e.g. "free tier exhausted") should
+            // mark the account permanently, not apply a temporary model lockout.
+            !isCreditsExhausted(message) &&
             lockModelIfPerModelQuota(
               provider,
               connectionId,
