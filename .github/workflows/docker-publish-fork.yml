@@ -41,6 +41,8 @@ jobs:
           context: .
           target: runner-base
           push: true
+          build-args: |
+            OMNIROUTE_USE_TURBOPACK=0
           tags: |
             ${{ steps.repo.outputs.image }}:${{ inputs.tag || github.ref_name }}
             ${{ steps.repo.outputs.image }}:${{ inputs.tag || github.ref_name }}-${{ github.run_number }}
