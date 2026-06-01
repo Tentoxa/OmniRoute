@@ -14,7 +14,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push:
@@ -24,6 +23,10 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Lowercase repo
+        id: repo
+        run: echo "image=${{ env.REGISTRY }}/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/omniroute" >> $GITHUB_OUTPUT
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -39,5 +42,5 @@ jobs:
           target: runner-base
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag || github.ref_name }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag || github.ref_name }}-${{ github.run_number }}
+            ${{ steps.repo.outputs.image }}:${{ inputs.tag || github.ref_name }}
+            ${{ steps.repo.outputs.image }}:${{ inputs.tag || github.ref_name }}-${{ github.run_number }}
