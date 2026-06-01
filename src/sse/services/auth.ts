@@ -1004,9 +1004,11 @@ export async function getProviderCredentials(
       if (requestedModel && isModelExcludedByConnection(requestedModel, c.providerSpecificData)) {
         return false;
       }
+      // Terminal accounts (credits_exhausted, banned, expired) are
+      // permanently dead — always exclude them, even during live tests.
+      if (isTerminalConnectionStatus(c)) return false;
       if (!allowSuppressedConnections) {
         if (!allowRateLimitedConnections && isAccountUnavailable(c.rateLimitedUntil)) return false;
-        if (isTerminalConnectionStatus(c)) return false;
         if (provider === "codex" && isCodexScopeUnavailable(c, requestedModel)) return false;
         // Per-model lockout: if this specific model is locked on this connection, skip it
         if (requestedModel && isModelLocked(provider, c.id, requestedModel)) return false;
