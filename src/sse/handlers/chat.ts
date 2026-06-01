@@ -842,6 +842,8 @@ async function handleSingleModelChat(
   let requestRetryLastError = null;
   let requestRetryLastStatus = null;
   let requestRetryLastCooldownMs = 0;
+  let consecutiveSameError = 0;
+  const MAX_CONSECUTIVE_SAME_ERROR = 40;
 
   requestAttemptLoop: while (true) {
     const excludedConnectionIds = new Set<string>();
@@ -1326,9 +1328,20 @@ async function handleSingleModelChat(
         log.warn("AUTH", `Account ${accountId}... unavailable (${result.status}), trying fallback`);
         excludedConnectionIds.add(credentials.connectionId);
         lastError = result.error;
+        // T-BAIL: if N consecutive accounts fail with the same status,
+        // the provider is likely down — stop cycling and return the error.
+        if (result.status === lastStatus) {
+          consecutiveSameError++;
+        } else {
+          consecutiveSameError = 1;
+        }
         lastStatus = result.status;
         requestRetryLastError = result.error;
         requestRetryLastStatus = result.status;
+        if (consecutiveSameError >= MAX_CONSECUTIVE_SAME_ERROR) {
+          log.warn("AUTH", `${provider} | ${consecutiveSameError} consecutive ${result.status}s, bailing`);
+          break requestAttemptLoop;
+        }
         continue;
       }
 
