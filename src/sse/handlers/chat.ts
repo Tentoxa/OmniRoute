@@ -819,8 +819,6 @@ async function handleSingleModelChat(
   let requestRetryLastError = null;
   let requestRetryLastStatus = null;
   let requestRetryLastCooldownMs = 0;
-  let consecutiveSameError = 0;
-  const MAX_CONSECUTIVE_SAME_ERROR = 40;
 
   requestAttemptLoop: while (true) {
     const excludedConnectionIds = new Set<string>();
@@ -1305,29 +1303,30 @@ async function handleSingleModelChat(
         log.warn("AUTH", `Account ${accountId}... unavailable (${result.status}), trying fallback`);
         excludedConnectionIds.add(credentials.connectionId);
         lastError = result.error;
-        // T-BAIL: if N consecutive accounts fail with the same status,
-        // the provider is likely down — stop cycling and return the error.
-        if (result.status === lastStatus) {
-          consecutiveSameError++;
-        } else {
-          consecutiveSameError = 1;
-        }
         lastStatus = result.status;
         requestRetryLastError = result.error;
         requestRetryLastStatus = result.status;
-        if (consecutiveSameError >= MAX_CONSECUTIVE_SAME_ERROR) {
-          log.warn("AUTH", `${provider} | ${consecutiveSameError} consecutive ${result.status}s, bailing`);
-          break requestAttemptLoop;
-        }
-        continue;
-      }
 
-      if (
-        !forceLiveComboTest &&
-        !isCombo &&
-        PROVIDER_BREAKER_FAILURE_STATUSES.has(Number(result.status))
-      ) {
-        breaker._onFailure();
+        // If this account failure is a provider-level error (503/502/500/408),
+        // feed the circuit breaker. When it trips mid-request we stop cycling
+        // through accounts and return immediately — the breaker protects all
+        // subsequent requests for the cooldown period.
+        if (
+          !forceLiveComboTest &&
+          !isCombo &&
+          PROVIDER_BREAKER_FAILURE_STATUSES.has(Number(result.status))
+        ) {
+          breaker._onFailure();
+          if (!breaker.canExecute()) {
+            log.warn("AUTH", `${provider} | circuit breaker tripped after ${result.status}, bailing`);
+            if (Number.isFinite(cooldownMs) && cooldownMs > 0) {
+              requestRetryLastCooldownMs = Math.max(requestRetryLastCooldownMs, cooldownMs);
+            }
+            break requestAttemptLoop;
+          }
+        }
+
+        continue;
       }
 
       return result.response;
