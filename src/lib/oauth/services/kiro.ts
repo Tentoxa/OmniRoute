@@ -362,6 +362,72 @@ export class KiroService {
   }
 
   /**
+   * Validate and import an External IdP (Enterprise SSO) credential blob.
+   *
+   * Unlike the AWS SSO OIDC path, the refresh token here is issued by an
+   * external Identity Provider (e.g. Microsoft Entra ID / Azure AD) and must
+   * be refreshed against the IdP's own token endpoint — not oidc.amazonaws.com.
+   *
+   * We do NOT attempt a refresh at import time. The access token in the blob
+   * is still valid (the user just exported it from Kiro's desktop auth state),
+   * and the CodeWhisperer API will accept it as a Bearer token regardless of
+   * which IdP issued it — AWS has a federation trust with the tenant.
+   * Attempting a refresh would needlessly burn a one-time-use refresh token
+   * (Microsoft RTs can be rotated per-use depending on tenant policy).
+   *
+   * Instead we store the IdP metadata (tokenEndpoint, clientId, issuerUrl,
+   * scopes) in providerSpecificData so the scheduled refresh path can call
+   * the right endpoint when the access token eventually expires.
+   *
+   * The `expiresIn` is derived from the JWT `exp` claim so the connection's
+   * expiresAt is accurate from the start.
+   */
+  validateExternalIdpToken(input: {
+    accessToken: string;
+    refreshToken: string;
+    tokenEndpoint: string;
+    issuerUrl: string;
+    clientId: string;
+    scopes: string;
+    profileArn?: string;
+  }) {
+    const { accessToken, refreshToken, tokenEndpoint, issuerUrl, clientId, scopes, profileArn } =
+      input;
+
+    // Derive expiresIn from the JWT exp claim if possible
+    let expiresIn = 3600;
+    try {
+      const parts = accessToken.split(".");
+      if (parts.length === 3) {
+        let payload = parts[1];
+        while (payload.length % 4) payload += "=";
+        const decoded = JSON.parse(
+          Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString()
+        ) as { exp?: number; iat?: number };
+        if (typeof decoded.exp === "number" && typeof decoded.iat === "number") {
+          expiresIn = Math.max(1, decoded.exp - decoded.iat);
+        } else if (typeof decoded.exp === "number") {
+          expiresIn = Math.max(1, decoded.exp - Math.floor(Date.now() / 1000));
+        }
+      }
+    } catch {
+      // Not a JWT or malformed — default to 3600s
+    }
+
+    return {
+      accessToken,
+      refreshToken,
+      expiresIn,
+      authMethod: "external_idp" as const,
+      tokenEndpoint,
+      issuerUrl,
+      clientId,
+      scopes,
+      profileArn: profileArn || undefined,
+    };
+  }
+
+  /**
    * Read clientId/clientSecret from AWS SSO cache (for Builder ID tokens).
    * The cache is located at ~/.aws/sso/cache/ and contains JSON files from
    * the OIDC client registration step of the device code flow.

@@ -205,6 +205,32 @@ export const kiroImportSchema = z.object({
   region: z.string().trim().default("us-east-1"),
 });
 
+/**
+ * Kiro External IdP (Enterprise SSO) import schema.
+ * Accepts the full credential blob exported from Kiro's desktop auth state
+ * when an organization federates Kiro access through its own Identity Provider
+ * (e.g. Microsoft Entra ID / Azure AD). Unlike the AWS SSO OIDC path, the
+ * refresh token here is issued by the external IdP's token endpoint and must
+ * be refreshed against it — not against oidc.amazonaws.com.
+ */
+export const kiroExternalIdpSchema = z.object({
+  accessToken: z.string().trim().min(1, "Access token is required"),
+  refreshToken: z.string().trim().min(1, "Refresh token is required"),
+  tokenEndpoint: z
+    .string()
+    .trim()
+    .url("Token endpoint must be a valid URL")
+    .refine((url) => url.startsWith("https://"), "Token endpoint must use HTTPS"),
+  issuerUrl: z
+    .string()
+    .trim()
+    .url("Issuer URL must be a valid URL")
+    .refine((url) => url.startsWith("https://"), "Issuer URL must use HTTPS"),
+  clientId: z.string().trim().min(1, "Client ID is required"),
+  scopes: z.string().trim().min(1, "Scopes are required"),
+  profileArn: z.string().trim().optional(),
+});
+
 export const kiroSocialExchangeSchema = z.object({
   code: z.string().trim().min(1, "Code is required"),
   codeVerifier: z.string().trim().min(1, "Code verifier is required"),

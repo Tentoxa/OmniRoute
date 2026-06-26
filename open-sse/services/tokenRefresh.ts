@@ -537,10 +537,7 @@ export async function refreshCodebuddyCnToken(
       expiresIn: data.data.expiresIn,
     };
   } catch (error) {
-    log?.error?.(
-      "TOKEN_REFRESH",
-      `Network error refreshing CodeBuddy CN token: ${error?.message}`
-    );
+    log?.error?.("TOKEN_REFRESH", `Network error refreshing CodeBuddy CN token: ${error?.message}`);
     return null;
   }
 }
@@ -1137,6 +1134,83 @@ export async function refreshKiroToken(
     const clientId = providerSpecificData?.clientId;
     const clientSecret = providerSpecificData?.clientSecret;
     const region = providerSpecificData?.region;
+
+    // External IdP (Enterprise SSO — e.g. Microsoft Entra ID / Azure AD).
+    // The refresh token is issued by the external IdP's token endpoint, not
+    // AWS SSO OIDC, so it must be refreshed against the IdP. The tokenEndpoint,
+    // clientId and scopes are stored in providerSpecificData at import time.
+    if (authMethod === "external_idp") {
+      const tokenEndpoint = providerSpecificData?.tokenEndpoint;
+      const scopes = providerSpecificData?.scopes;
+
+      if (!tokenEndpoint || !clientId || !scopes) {
+        log?.error?.("TOKEN_REFRESH", "Missing external_idp refresh metadata", {
+          hasTokenEndpoint: !!tokenEndpoint,
+          hasClientId: !!clientId,
+          hasScopes: !!scopes,
+        });
+        return { error: "unrecoverable_refresh_error", code: "missing_idp_metadata" };
+      }
+
+      const response = await runWithProxyContext(proxyConfig, () =>
+        fetch(tokenEndpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+          },
+          body: new URLSearchParams({
+            client_id: clientId,
+            grant_type: "refresh_token",
+            refresh_token: refreshToken,
+            scope: scopes,
+          }).toString(),
+        })
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let idpErrorType: string | undefined;
+        try {
+          const idpError = JSON.parse(errorText);
+          idpErrorType = idpError.error || idpError.__type;
+        } catch {
+          // not JSON
+        }
+
+        if (
+          idpErrorType === "invalid_grant" ||
+          idpErrorType === "invalid_client" ||
+          idpErrorType === "interaction_required"
+        ) {
+          log?.error?.(
+            "TOKEN_REFRESH",
+            "Kiro external_idp refresh token expired/invalid. Re-authentication required.",
+            { idpErrorType }
+          );
+          return { error: "unrecoverable_refresh_error", code: idpErrorType };
+        }
+
+        log?.error?.("TOKEN_REFRESH", "Failed to refresh Kiro external_idp token", {
+          status: response.status,
+          error: errorText.slice(0, 200),
+        });
+        return null;
+      }
+
+      const tokens = await response.json();
+
+      log?.info?.("TOKEN_REFRESH", "Successfully refreshed Kiro external_idp token", {
+        hasNewAccessToken: !!tokens.access_token,
+        expiresIn: tokens.expires_in,
+      });
+
+      return {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token || refreshToken,
+        expiresIn: tokens.expires_in || 3600,
+      };
+    }
 
     // AWS SSO OIDC (Builder ID or IDC)
     // If clientId and clientSecret exist, assume AWS SSO OIDC (default to builder-id if authMethod not specified).

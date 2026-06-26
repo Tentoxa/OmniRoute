@@ -32,6 +32,7 @@ export default function KiroAuthModal({
   const [importing, setImporting] = useState(false);
   const [autoDetecting, setAutoDetecting] = useState(false);
   const [autoDetected, setAutoDetected] = useState(false);
+  const [externalIdpJson, setExternalIdpJson] = useState("");
 
   // Auto-detect token when import method is selected
   useEffect(() => {
@@ -100,6 +101,56 @@ export default function KiroAuthModal({
       }
 
       // Success - close modal
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleExternalIdpImport = async () => {
+    const trimmed = externalIdpJson.trim();
+    if (!trimmed) {
+      setError("Please paste your Kiro credential JSON");
+      return;
+    }
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      setError("Invalid JSON — please paste the full credential blob from Kiro");
+      return;
+    }
+
+    const required = ["accessToken", "refreshToken", "tokenEndpoint", "clientId", "scopes"];
+    for (const field of required) {
+      if (typeof parsed[field] !== "string" || !(parsed[field] as string).trim()) {
+        setError(`Missing or invalid field: ${field}`);
+        return;
+      }
+    }
+
+    setImporting(true);
+    setError(null);
+
+    try {
+      const res = await fetch(
+        `/api/oauth/kiro/import-external-idp?targetProvider=${encodeURIComponent(providerId)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(parsed),
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Import failed");
+      }
+
       onClose();
     } catch (err) {
       setError(err.message);
@@ -204,6 +255,23 @@ export default function KiroAuthModal({
                   <h3 className="font-semibold mb-1">Import Token</h3>
                   <p className="text-sm text-text-muted">
                     Paste a refresh token exported from {providerLabel}.
+                  </p>
+                </div>
+              </div>
+            </button>
+
+            {/* External IdP / Enterprise SSO */}
+            <button
+              onClick={() => handleMethodSelect("external-idp")}
+              className="w-full p-4 text-left border border-border rounded-lg hover:bg-sidebar transition-colors"
+            >
+              <div className="flex items-start gap-3">
+                <span className="material-symbols-outlined text-primary mt-0.5">badge</span>
+                <div className="flex-1">
+                  <h3 className="font-semibold mb-1">External IdP / Enterprise SSO</h3>
+                  <p className="text-sm text-text-muted">
+                    Paste the full credential JSON from a federated login (Microsoft Entra ID, Okta,
+                    etc.).
                   </p>
                 </div>
               </div>
@@ -399,6 +467,65 @@ export default function KiroAuthModal({
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* External IdP / Enterprise SSO */}
+        {selectedMethod === "external-idp" && (
+          <div className="space-y-4">
+            <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
+              <div className="flex gap-2">
+                <span className="material-symbols-outlined text-blue-600 dark:text-blue-400">
+                  info
+                </span>
+                <div className="text-sm text-blue-800 dark:text-blue-200">
+                  <p className="font-medium mb-1">How to get your credential JSON</p>
+                  <ol className="list-decimal list-inside space-y-0.5 text-xs">
+                    <li>Sign in to {providerLabel} via your organization&apos;s SSO</li>
+                    <li>
+                      Locate the credential file in {providerLabel}&apos;s data directory (look for
+                      a JSON file containing <code>accessToken</code> and <code>refreshToken</code>)
+                    </li>
+                    <li>Copy the entire JSON content and paste it below</li>
+                  </ol>
+                  <p className="mt-1 text-xs text-blue-700 dark:text-blue-300">
+                    Works with Microsoft Entra ID, Okta, and other federated IdPs.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                Credential JSON <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={externalIdpJson}
+                onChange={(e) => setExternalIdpJson(e.target.value)}
+                placeholder='{"accessToken": "eyJ...", "refreshToken": "1.Ac...", "tokenEndpoint": "https://...", "clientId": "...", "scopes": "...", "issuerUrl": "..."}'
+                className="w-full h-48 p-3 border border-border rounded-lg font-mono text-xs resize-y bg-background"
+                spellCheck={false}
+              />
+            </div>
+
+            {error && (
+              <div className="bg-red-50 dark:bg-red-900/20 p-3 rounded-lg border border-red-200 dark:border-red-800">
+                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <Button
+                onClick={handleExternalIdpImport}
+                fullWidth
+                disabled={importing || !externalIdpJson.trim()}
+              >
+                {importing ? "Importing..." : "Import Credential"}
+              </Button>
+              <Button onClick={handleBack} variant="ghost" fullWidth>
+                Back
+              </Button>
+            </div>
           </div>
         )}
       </div>

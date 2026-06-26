@@ -279,6 +279,17 @@ export class KiroExecutor extends BaseExecutor {
 
     if (credentials.accessToken) {
       headers["Authorization"] = `Bearer ${credentials.accessToken}`;
+
+      // Enterprise / Microsoft Entra (external_idp) tokens are OAuth access
+      // tokens issued by an external IdP. CodeWhisperer requires TokenType:
+      // EXTERNAL_IDP to bind them to the correct federation profile — without
+      // it, the API returns 403 "bearer token is invalid" even though the JWT
+      // itself is valid (the token authenticates, but AWS can't determine
+      // which subscription/profile to charge).
+      const psd = (credentials.providerSpecificData || {}) as Record<string, unknown>;
+      if (psd.authMethod === "external_idp") {
+        headers["TokenType"] = "EXTERNAL_IDP";
+      }
     }
 
     return headers;
